@@ -1,7 +1,6 @@
 import { Router } from 'express';
 import { authRouter } from './authRoutes.js';
 import { petRouter } from './petRoutes.js';
-
 /**
  * Versioned API router.
  *
@@ -9,6 +8,6 @@ import { petRouter } from './petRoutes.js';
  * Order doesn't matter for different prefixes.
  */
 export const apiRouter = Router();
-
 apiRouter.use('/auth', authRouter);
 apiRouter.use('/pets', petRouter);
+//# sourceMappingURL=index.js.map

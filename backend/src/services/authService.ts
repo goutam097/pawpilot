@@ -13,6 +13,7 @@ import { ERROR_CODES } from '../constants/errorCodes.js';
 import type {
   RegisterInput,
   LoginInput,
+  UpdateProfileInput,
 } from '../validators/authValidators.js';
 import type { UserDocument } from '../models/User.js';
 
@@ -117,7 +118,16 @@ export const authService = {
       );
     }
 
-    const passwordOk = await verifyPassword(input.password, user.passwordHash);
+    const passwordHash = typeof user.passwordHash === 'string' ? user.passwordHash : null;
+    if (!passwordHash) {
+      throw new AppError(
+        'User account is missing a password hash',
+        HTTP_STATUS.UNAUTHORIZED,
+        ERROR_CODES.INVALID_CREDENTIALS,
+      );
+    }
+
+    const passwordOk = await verifyPassword(input.password, passwordHash);
     if (!passwordOk) {
       // Same error as "user not found" — the client can't distinguish.
       throw new AppError(
@@ -207,7 +217,7 @@ export const authService = {
 
   async updateProfile(
     userId: string,
-    input: { name?: string },
+    input: UpdateProfileInput,
   ): Promise<UserDocument> {
     if (input.name === undefined) {
       // Should be prevented by the validator, but be defensive.

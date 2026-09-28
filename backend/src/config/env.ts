@@ -4,6 +4,7 @@ type NodeEnv = 'development' | 'production' | 'test';
 
 interface Env {
   readonly nodeEnv: NodeEnv;
+  readonly host: string;
   readonly port: number;
   readonly isProduction: boolean;
   readonly corsOrigins: readonly string[];
@@ -22,6 +23,15 @@ function readNodeEnv(): NodeEnv {
     throw new Error(`Invalid NODE_ENV: "${raw}". Expected development | production | test.`);
   }
   return raw;
+}
+
+function readHost(): string {
+  const raw = process.env.HOST ?? '0.0.0.0';
+  const trimmed = raw.trim();
+  if (!trimmed) {
+    throw new Error('HOST cannot be empty. Use 0.0.0.0 for LAN access or localhost for local-only mode.');
+  }
+  return trimmed;
 }
 
 function readPort(): number {
@@ -80,6 +90,7 @@ if (jwtAccessSecret === jwtRefreshSecret) {
 
 export const env: Env = Object.freeze({
   nodeEnv,
+  host: readHost(),
   port: readPort(),
   isProduction: nodeEnv === 'production',
   corsOrigins: Object.freeze(readCorsOrigins(nodeEnv)),

@@ -2,7 +2,7 @@ import type { ErrorRequestHandler, NextFunction, Request, Response } from 'expre
 import { ZodError } from 'zod';
 import { AppError } from '../utils/AppError.js';
 import { fail } from '../utils/apiResponse.js';
-import { HTTP_STATUS } from '../constants/httpStatus.js';
+import { HTTP_STATUS, type HttpStatus } from '../constants/httpStatus.js';
 import { ERROR_CODES } from '../constants/errorCodes.js';
 import { env } from '../config/env.js';
 
@@ -29,7 +29,7 @@ export const errorHandler: ErrorRequestHandler = (
 ): void => {
   // --- Normalize the unknown error into { status, code, message, details } ---
 
-  let status = HTTP_STATUS.INTERNAL_SERVER_ERROR;
+  let status: HttpStatus = HTTP_STATUS.INTERNAL_SERVER_ERROR;
   let code: (typeof ERROR_CODES)[keyof typeof ERROR_CODES] = ERROR_CODES.INTERNAL_ERROR;
   let message = 'Internal server error';
   let details: unknown;

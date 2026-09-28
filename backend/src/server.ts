@@ -17,13 +17,15 @@ async function bootstrap(): Promise<void> {
 
   const app = createApp();
 
-  const server = app.listen(env.port, () => {
+  const server = app.listen(env.port, env.host, () => {
+    const bindTarget = env.host === '0.0.0.0' ? '0.0.0.0' : env.host;
     console.log(
       JSON.stringify({
         level: 'info',
         type: 'server',
-        msg: `listening on http://localhost:${env.port}`,
+        msg: `listening on http://${bindTarget}:${env.port}`,
         env: env.nodeEnv,
+        accessUrl: `http://192.168.1.14:${env.port}`,
       }),
     );
   });

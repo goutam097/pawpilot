@@ -1,14 +1,5 @@
 /**
  * Machine-readable error codes returned in error responses.
- *
- * Why a separate code from the HTTP status?
- * - HTTP status is a coarse class (400 vs 404 vs 500).
- * - Clients often need to branch on a specific failure. "Invalid email format"
- *   and "email already registered" are both 400/409, but the mobile app wants
- *   to render a different message and focus a different field.
- * - Codes are stable API contract; human messages can change.
- *
- * Naming: SCREAMING_SNAKE_CASE, prefixed by domain where useful.
  */
 export const ERROR_CODES = {
   // Generic
@@ -19,14 +10,15 @@ export const ERROR_CODES = {
   FORBIDDEN: 'FORBIDDEN',
   UNAUTHORIZED: 'UNAUTHORIZED',
 
-  // Auth (used starting Phase 5)
+  // Auth
   INVALID_CREDENTIALS: 'INVALID_CREDENTIALS',
   EMAIL_ALREADY_REGISTERED: 'EMAIL_ALREADY_REGISTERED',
   TOKEN_EXPIRED: 'TOKEN_EXPIRED',
   TOKEN_INVALID: 'TOKEN_INVALID',
 
-  // Pets / domain (used from Phase 7)
+  // Pets
   PET_NOT_FOUND: 'PET_NOT_FOUND',
+  PET_ALREADY_ARCHIVED: 'PET_ALREADY_ARCHIVED',
 } as const;
 
 export type ErrorCode = (typeof ERROR_CODES)[keyof typeof ERROR_CODES];
