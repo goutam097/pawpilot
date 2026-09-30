@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { authRouter } from './authRoutes.js';
 import { petRouter } from './petRoutes.js';
+import { deviceRouter } from './deviceRoutes.js';
 /**
  * Versioned API router.
  *
@@ -10,4 +11,5 @@ import { petRouter } from './petRoutes.js';
 export const apiRouter = Router();
 apiRouter.use('/auth', authRouter);
 apiRouter.use('/pets', petRouter);
+apiRouter.use('/devices', deviceRouter);
 //# sourceMappingURL=index.js.map

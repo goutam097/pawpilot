@@ -1,40 +1,34 @@
-import { Types } from 'mongoose';
-import { petRepository } from '../repositories/petRepository.js';
-import { petDashboardRepository } from '../repositories/petDashboardRepository.js';
-import { serializePet } from './petService.js';
-import { AppError } from '../utils/AppError.js';
-import { HTTP_STATUS } from '../constants/httpStatus.js';
-import { ERROR_CODES } from '../constants/errorCodes.js';
+import { Types } from "mongoose";
+import { petRepository } from "../repositories/petRepository.js";
+import { petDashboardRepository } from "../repositories/petDashboardRepository.js";
+import { reminderRepository } from "../repositories/reminderRepository.js";
+import { medicationRepository } from '../repositories/medicationRepository.js';
+import { serializePet } from "./petService.js";
+import { AppError } from "../utils/AppError.js";
+import { HTTP_STATUS } from "../constants/httpStatus.js";
+import { ERROR_CODES } from "../constants/errorCodes.js";
+import { vaccinationRepository } from '../repositories/vaccinationRepository.js';
 /**
  * Pet dashboard service.
  *
- * Builds one aggregated view for a pet. Everything the dashboard shows comes
- * from this function — no client-side data fetching for individual sections.
+ * Builds one aggregated view for a pet. Every section that isn't `pet` and
+ * `weight` currently returns placeholder data (for phases we haven't built
+ * yet) or real data (for reminders, which we just built).
  *
- * Structure: each section is computed by a dedicated private function, and
- * `build()` composes them. This makes adding a section (e.g. `health` in
- * Phase 11) a one-function addition, not a rewrite.
- *
- * Data ownership: every repository call scoped by `ownerId`. The `getDashboard`
- * service function never touches Mongo directly.
+ * The sections are computed by dedicated functions and composed in
+ * `getDashboard`. Adding a new section (e.g. vaccinations in Phase 11) is a
+ * matter of adding one function and one line here.
  */
+const UPCOMING_LIMIT = 5;
+const MAX_UPCOMING_DAYS_AHEAD = 90;
 function toObjectId(id) {
     return new Types.ObjectId(id);
 }
-/**
- * Build the `weight` section.
- *
- * Reads the two most recent weight records (if any) and computes change.
- * The pet's `weight` field is our fallback when there are no records yet —
- * a user who set a weight at pet creation sees it on the dashboard, even
- * before they've logged a formal weight record.
- */
 function buildWeightSection(petWeight, petWeightUnit, latest, previous) {
-    // Prefer the latest weight record; fall back to the pet's stored weight.
-    // This gives a coherent story: "pet's current weight" is the same number
-    // whether you look at the pet detail or the dashboard.
     if (latest) {
-        const change = previous ? Math.round((latest.weight - previous.weight) * 100) / 100 : null;
+        const change = previous
+            ? Math.round((latest.weight - previous.weight) * 100) / 100
+            : null;
         return {
             current: latest.weight,
             unit: latest.unit,
@@ -61,68 +55,97 @@ function buildWeightSection(petWeight, petWeightUnit, latest, previous) {
     };
 }
 /**
- * Placeholder upcoming events. Phase 9 populates this from the Reminder
- * collection; Phase 11 from Vaccination; Phase 12 from Medication.
+ * Convert a reminder document into an UpcomingEvent.
  *
- * Returning `[]` now keeps the response shape stable.
+ * The type mapping is straightforward for now — reminder.type is one of
+ * vaccination/medication/vet_visit/grooming/feeding/custom, all of which
+ * exist in UpcomingEventType.
  */
-async function buildUpcomingSection() {
-    return [];
-}
-/**
- * Placeholder health section. Phase 11 (vaccinations) and Phase 12
- * (medications) fill this in.
- */
-function buildHealthSection() {
+function reminderToUpcomingEvent(reminder, now) {
+    const dueAt = reminder.dueAt;
     return {
-        lastVaccinationAt: null,
-        nextVaccinationDueAt: null,
-        activeMedications: 0,
+        id: reminder._id.toString(),
+        type: reminder.type,
+        title: reminder.title,
+        dueAt: dueAt.toISOString(),
+        overdue: dueAt.getTime() < now.getTime(),
     };
 }
 /**
- * Placeholder stats. Phase 9 (reminders), Phase 16 (expenses).
+ * Build the upcoming section from reminders.
+ *
+ * Filtering policy:
+ * - Limit to reminders due within `MAX_UPCOMING_DAYS_AHEAD` days OR overdue.
+ *   A reminder due in 400 days is not useful on the dashboard.
+ * - Cap at UPCOMING_LIMIT items.
+ * - Sort by due date ascending (most urgent first).
  */
-function buildStatsSection() {
+function buildUpcomingSection(reminders, now) {
+    const horizon = now.getTime() + MAX_UPCOMING_DAYS_AHEAD * 86_400_000;
+    return reminders
+        .filter((r) => {
+        const t = r.dueAt.getTime();
+        // Overdue (past) OR within the horizon.
+        return t < now.getTime() || t <= horizon;
+    })
+        .slice(0, UPCOMING_LIMIT)
+        .map((r) => reminderToUpcomingEvent(r, now));
+}
+/**
+ * Build the health section from vaccination data.
+ *
+ * `activeMedications` stays 0 until Phase 12.
+ */
+function buildHealthSection(latestVaccination, nextDueVaccination, activeMedications) {
     return {
-        remindersDueThisWeek: 0,
-        expensesThisMonthCents: null,
+        lastVaccinationAt: latestVaccination ? latestVaccination.givenAt.toISOString() : null,
+        nextVaccinationDueAt: nextDueVaccination?.nextDueAt?.toISOString() ?? null,
+        activeMedications,
+    };
+}
+function buildStatsSection(remindersDueThisWeek) {
+    return {
+        remindersDueThisWeek,
+        expensesThisMonthCents: null, // Phase 16
     };
 }
 export const petDashboardService = {
     async getDashboard(userId, petId) {
-        // First, verify the pet exists AND belongs to the user. This single
-        // call is our authorization check. If it returns null, we throw 404
-        // (never 403 — see Phase 7's reasoning on not leaking existence).
         const ownerId = toObjectId(userId);
+        // 1. Verify pet ownership. If the pet doesn't exist or isn't ours → 404.
+        //    This is the ONLY pet ownership check we do; downstream queries use
+        //    the confirmed ownerId + petId without re-verifying.
         const pet = await petRepository.findByIdForOwner(petId, ownerId);
         if (!pet) {
-            throw new AppError('Pet not found', HTTP_STATUS.NOT_FOUND, ERROR_CODES.PET_NOT_FOUND);
+            throw new AppError("Pet not found", HTTP_STATUS.NOT_FOUND, ERROR_CODES.PET_NOT_FOUND);
         }
-        const petWeightValue = typeof pet.weight === 'number' ? pet.weight : null;
-        const petWeightUnit = pet.weightUnit === 'kg' || pet.weightUnit === 'lb' ? pet.weightUnit : 'kg';
-        // Fetch the two most recent weight records in one query.
-        // If the pet has fewer than 2, we get what exists.
         const petObjectId = toObjectId(petId);
-        const weights = await petDashboardRepository.latestWeightRecords(ownerId, petObjectId, 2);
-        const [latest, prev] = weights;
-        const latestWeight = latest && typeof latest.weight === 'number' && (latest.unit === 'kg' || latest.unit === 'lb')
+        const now = new Date();
+        // 2. Fetch everything the dashboard needs in parallel.
+        //    Each repository call is scoped by ownerId + petId — no cross-user
+        //    leakage possible.
+        const [weights, upcomingReminders, remindersDueThisWeek, latestVaccination, nextDueVaccination, activeMedications,] = await Promise.all([
+            petDashboardRepository.latestWeightRecords(ownerId, petObjectId, 2),
+            reminderRepository.listUpcomingForPet(ownerId, petObjectId, UPCOMING_LIMIT + 5),
+            reminderRepository.countDueWithinWeek(ownerId, petObjectId, now),
+            vaccinationRepository.latestForPet(ownerId, petObjectId),
+            vaccinationRepository.nextDueForPet(ownerId, petObjectId, now),
+            medicationRepository.countActiveForPet(ownerId, petObjectId, now),
+        ]);
+        const [latest, previous] = weights;
+        const weightSection = buildWeightSection(pet.weight ?? null, pet.weightUnit ?? 'kg', latest
             ? { weight: latest.weight, unit: latest.unit, recordedAt: latest.recordedAt }
-            : null;
-        const previousWeight = prev && typeof prev.weight === 'number' ? { weight: prev.weight } : null;
-        // Build sections. Each is independent; failures here don't take down
-        // the others (though for now they can't fail).
-        const weightSection = buildWeightSection(petWeightValue, petWeightUnit, latestWeight, previousWeight);
-        const upcoming = await buildUpcomingSection();
-        const health = buildHealthSection();
-        const stats = buildStatsSection();
+            : null, previous ? { weight: previous.weight } : null);
+        const upcoming = buildUpcomingSection(upcomingReminders, now);
+        const stats = buildStatsSection(remindersDueThisWeek);
+        const health = buildHealthSection(latestVaccination ? { givenAt: latestVaccination.givenAt } : null, nextDueVaccination ? { nextDueAt: nextDueVaccination.nextDueAt } : null, activeMedications);
         return {
             pet: serializePet(pet),
             weight: weightSection,
             upcoming,
             health,
             stats,
-            generatedAt: new Date().toISOString(),
+            generatedAt: now.toISOString(),
         };
     },
 };

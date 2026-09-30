@@ -1,7 +1,7 @@
 import {
   Schema,
   model,
-  type InferSchemaType,
+  Types,
   type HydratedDocument,
   type Model,
   type Query,
@@ -24,7 +24,26 @@ const SPECIES = ['dog', 'cat', 'other'] as const;
 const GENDERS = ['male', 'female', 'unknown'] as const;
 const WEIGHT_UNITS = ['kg', 'lb'] as const;
 
-const petSchema = new Schema(
+export interface Pet {
+  ownerId: Types.ObjectId;
+  name: string;
+  species: 'dog' | 'cat' | 'other';
+  breed: string | null;
+  gender: 'male' | 'female' | 'unknown';
+  dateOfBirth: Date | null;
+  weight: number | null;
+  weightUnit: 'kg' | 'lb';
+  color: string | null;
+  microchipNumber: string | null;
+  notes: string | null;
+  photoUrl: string | null;
+  archivedAt: Date | null;
+  deletedAt: Date | null;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+const petSchema = new Schema<Pet>(
   {
     ownerId: {
       type: Schema.Types.ObjectId,
@@ -159,7 +178,6 @@ petSchema.pre('countDocuments', function (this: Query<unknown, unknown>) {
   }
 });
 
-export type Pet = InferSchemaType<typeof petSchema>;
 export type PetDocument = HydratedDocument<Pet>;
 export type PetModel = Model<Pet>;
 

@@ -1,6 +1,7 @@
 import { createApp } from './app.js';
 import { env } from './config/env.js';
 import { connectDb, disconnectDb } from './config/db.js';
+import { startReminderNotifier, stopReminderNotifier } from './services/reminderNotifierService.js';
 /**
  * Process entry point.
  *
@@ -24,12 +25,16 @@ async function bootstrap() {
             accessUrl: `http://192.168.1.14:${env.port}`,
         }));
     });
+    // Start the reminder notifier. In tests, we won't call bootstrap, so the
+    // notifier doesn't interfere with test runs.
+    startReminderNotifier();
     let shuttingDown = false;
     const shutdown = (signal) => {
         if (shuttingDown)
             return; // guard against double SIGINT (Ctrl+C twice)
         shuttingDown = true;
         console.log(JSON.stringify({ level: 'info', type: 'server', msg: `received ${signal}` }));
+        stopReminderNotifier();
         server.close(async (err) => {
             if (err) {
                 console.error(JSON.stringify({ level: 'error', type: 'server', msg: 'http close error', error: err.message }));
