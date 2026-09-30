@@ -1,16 +1,22 @@
-import express, { type Express } from 'express';
+import express, { type Express } from "express";
 
-import { env } from './config/env.js';
-import { ok } from './utils/apiResponse.js';
-import { errorHandler } from './middlewares/errorHandler.js';
-import { notFound } from './middlewares/notFound.js';
-import { requestLogger } from './middlewares/requestLogger.js';
+import { env } from "./config/env.js";
+import { ok } from "./utils/apiResponse.js";
+import { errorHandler } from "./middlewares/errorHandler.js";
+import { notFound } from "./middlewares/notFound.js";
+import { requestLogger } from "./middlewares/requestLogger.js";
 import {
   helmetMiddleware,
   corsMiddleware,
   globalRateLimiter,
-} from './middlewares/security.js';
-import { apiRouter } from './routes/index.js';
+} from "./middlewares/security.js";
+import { apiRouter } from "./routes/index.js";
+import { publicLostPetRouter } from "./routes/lostPetRoutes.js";
+import { lostPetController } from "./controllers/lostPetController.js";
+import { asyncHandler } from "./utils/asyncHandler.js";
+import { publicRateLimiter } from "./middlewares/security.js";
+import { publicInvitationRouter } from './routes/memberRoutes.js';
+import { inviteRedirectController } from './controllers/inviteRedirectController.js';
 
 /**
  * Builds and returns a fully-configured Express application.
@@ -33,14 +39,14 @@ export function createApp(): Express {
   app.use(corsMiddleware);
   app.use(globalRateLimiter);
 
-  app.use(express.json({ limit: '1mb' }));
-  app.use(express.urlencoded({ extended: true, limit: '1mb' }));
+  app.use(express.json({ limit: "1mb" }));
+  app.use(express.urlencoded({ extended: true, limit: "1mb" }));
 
   // Health check lives outside /api/v1 — infrastructure tools should be able
   // to hit it without knowing about API versioning.
-  app.get('/health', (_req, res) => {
+  app.get("/health", (_req, res) => {
     ok(res, {
-      status: 'ok',
+      status: "ok",
       uptime: process.uptime(),
       timestamp: new Date().toISOString(),
       env: env.nodeEnv,
@@ -48,7 +54,32 @@ export function createApp(): Express {
   });
 
   // Versioned API
-  app.use('/api/v1', apiRouter);
+  app.use("/api/v1", apiRouter);
+  app.use('/api/v1/public/invitations', publicRateLimiter, publicInvitationRouter);
+  app.get('/invite/:token', publicRateLimiter, inviteRedirectController.get);
+  app.get(
+    "/lost/:token",
+    publicRateLimiter,
+    asyncHandler(lostPetController.getPublicHtml),
+  );
+
+  app.use("/api/v1/public/lost-pets", publicLostPetRouter);
+
+  app.get('/.well-known/apple-app-site-association', (_req, res) => {
+    if (!env.appleTeamId) {
+      res.status(404).end();
+      return;
+    }
+    res.type('application/json').send({
+      applinks: {
+        apps: [],
+        details: [{
+          appID: `${env.appleTeamId}.com.pawpilot.app`,
+          paths: ['/invite/*', '/lost/*'],
+        }],
+      },
+    });
+  });
 
   app.use(notFound);
   app.use(errorHandler);

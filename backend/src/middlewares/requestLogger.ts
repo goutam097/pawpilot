@@ -27,13 +27,9 @@ export function requestLogger(req: Request, res: Response, next: NextFunction): 
       level: 'info',
       type: 'http',
       method: req.method,
-      path: req.originalUrl,
+      path: req.route ? `${req.baseUrl}${req.route.path}` : req.path,
       status: res.statusCode,
       durationMs: Math.round(durationMs * 100) / 100,
-      // `ip` from Express respects `trust proxy` if configured. We don't yet,
-      // which is fine for local dev; adjust in Phase 29 (production config).
-      ip: req.ip,
-      userAgent: req.get('user-agent') ?? undefined,
     });
 
     console.log(line);

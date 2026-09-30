@@ -27,7 +27,7 @@ export const REMINDER_TYPES = [
 export type ReminderType = (typeof REMINDER_TYPES)[number];
 
 export interface Reminder {
-  ownerId: Types.ObjectId;
+  createdBy: Types.ObjectId;
   petId: Types.ObjectId;
   title: string;
   description: string | null;
@@ -54,7 +54,7 @@ const reminderSchema = new Schema<Reminder>(
      * Owner — used for authorization on every query. Denormalized from pet
      * so a "list my reminders across all pets" query is a single scan.
      */
-    ownerId: {
+    createdBy: {
       type: Schema.Types.ObjectId,
       ref: "User",
       required: true,
@@ -232,7 +232,7 @@ reminderSchema.index({ petId: 1, completed: 1, dueAt: 1 });
  * "All reminders for this user, sorted by due date" — used by a future
  * global reminders screen.
  */
-reminderSchema.index({ ownerId: 1, completed: 1, dueAt: 1 });
+reminderSchema.index({ createdBy: 1, completed: 1, dueAt: 1 });
 
 /**
  * The notifier's query: "pending reminders whose notifyAt falls in the

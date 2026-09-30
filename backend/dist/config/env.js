@@ -52,12 +52,21 @@ function readJwtSecret(name) {
     }
     return secret;
 }
+function readCloudinaryConfig() {
+    return {
+        cloudName: readRequiredString('CLOUDINARY_CLOUD_NAME', 3),
+        apiKey: readRequiredString('CLOUDINARY_API_KEY', 3),
+        apiSecret: readRequiredString('CLOUDINARY_API_SECRET', 3),
+        folder: process.env.CLOUDINARY_FOLDER?.trim() || 'pawpilot',
+    };
+}
 const nodeEnv = readNodeEnv();
 const jwtAccessSecret = readJwtSecret('JWT_ACCESS_SECRET');
 const jwtRefreshSecret = readJwtSecret('JWT_REFRESH_SECRET');
 if (jwtAccessSecret === jwtRefreshSecret) {
     throw new Error('JWT_ACCESS_SECRET and JWT_REFRESH_SECRET must be different values.');
 }
+const cloudinaryConfig = readCloudinaryConfig();
 export const env = Object.freeze({
     nodeEnv,
     host: readHost(),
@@ -69,5 +78,10 @@ export const env = Object.freeze({
     jwtRefreshSecret,
     jwtAccessExpiresIn: process.env.JWT_ACCESS_EXPIRES_IN ?? '15m',
     jwtRefreshExpiresIn: process.env.JWT_REFRESH_EXPIRES_IN ?? '30d',
+    cloudinaryCloudName: cloudinaryConfig.cloudName,
+    cloudinaryApiKey: cloudinaryConfig.apiKey,
+    cloudinaryApiSecret: cloudinaryConfig.apiSecret,
+    cloudinaryFolder: cloudinaryConfig.folder,
+    publicAppUrl: process.env.PUBLIC_APP_URL?.trim() || 'https://pawpilot.app',
 });
 //# sourceMappingURL=env.js.map

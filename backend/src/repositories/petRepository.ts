@@ -104,7 +104,7 @@ export const petRepository = {
     return PetModel.findOneAndUpdate(
       { _id: petId, ownerId },
       { $set: data },
-      { new: true, runValidators: true },
+      { returnDocument: 'after', runValidators: true },
     ).exec();
   },
 
@@ -120,7 +120,7 @@ export const petRepository = {
     return PetModel.findOneAndUpdate(
       { _id: petId, ownerId },
       { $set: { deletedAt: new Date() } },
-      { new: true },
+      { returnDocument: 'after' },
     ).exec();
   },
 
@@ -131,4 +131,27 @@ export const petRepository = {
   async countActiveForOwner(ownerId: Types.ObjectId): Promise<number> {
     return PetModel.countDocuments({ ownerId, deletedAt: null }).exec();
   },
+
+  /**
+ * Update by id only. Authorization must be checked by the caller.
+ * Used by petService after petPermissions.checkAccess.
+ */
+async updateById(
+  petId: Types.ObjectId,
+  data: UpdatePetData,
+): Promise<PetDocument | null> {
+  return PetModel.findByIdAndUpdate(
+    petId,
+    { $set: data },
+    { returnDocument: 'after', runValidators: true },
+  ).exec();
+},
+
+async softDeleteById(petId: Types.ObjectId): Promise<PetDocument | null> {
+  return PetModel.findByIdAndUpdate(
+    petId,
+    { $set: { deletedAt: new Date() } },
+    { returnDocument: 'after' },
+  ).exec();
+}
 };

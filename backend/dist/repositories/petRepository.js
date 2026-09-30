@@ -59,5 +59,15 @@ export const petRepository = {
     async countActiveForOwner(ownerId) {
         return PetModel.countDocuments({ ownerId, deletedAt: null }).exec();
     },
+    /**
+   * Update by id only. Authorization must be checked by the caller.
+   * Used by petService after petPermissions.checkAccess.
+   */
+    async updateById(petId, data) {
+        return PetModel.findByIdAndUpdate(petId, { $set: data }, { new: true, runValidators: true }).exec();
+    },
+    async softDeleteById(petId) {
+        return PetModel.findByIdAndUpdate(petId, { $set: { deletedAt: new Date() } }, { new: true }).exec();
+    }
 };
 //# sourceMappingURL=petRepository.js.map

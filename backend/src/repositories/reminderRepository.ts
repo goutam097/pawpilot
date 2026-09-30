@@ -5,13 +5,12 @@ import type { RepeatRule } from '../utils/recurrence.js';
 /**
  * Reminder repository.
  *
- * Every read and mutation is scoped by `ownerId`. This is the same
- * authorization invariant as everywhere else in the codebase: a query
- * cannot return data that doesn't belong to the requesting user.
+ * The service checks pet permissions before every call; repository reads are
+ * scoped to the pet so family members share the same child records.
  */
 
 export interface CreateReminderData {
-  ownerId: Types.ObjectId;
+  createdBy: Types.ObjectId;
   petId: Types.ObjectId;
   title: string;
   description: string | null;
@@ -36,7 +35,6 @@ export interface UpdateReminderData {
 }
 
 export interface ListRemindersOptions {
-  ownerId: Types.ObjectId;
   petId: Types.ObjectId;
   completed: 'false' | 'true' | 'all';
   limit: number;
@@ -45,7 +43,6 @@ export interface ListRemindersOptions {
 export const reminderRepository = {
   async listForPet(options: ListRemindersOptions): Promise<ReminderDocument[]> {
     const filter: Record<string, unknown> = {
-      ownerId: options.ownerId,
       petId: options.petId,
     };
     if (options.completed === 'false') filter.completed = false;
@@ -58,38 +55,30 @@ export const reminderRepository = {
   },
 
   /**
-   * Fetch a single reminder, scoped to owner AND pet.
-   *
-   * Why both ownerId AND petId?
-   *   - ownerId ensures authorization (this user owns the reminder).
-   *   - petId ensures the URL is coherent: `/pets/A/reminders/B` should only
-   *     return reminder B if it actually belongs to pet A. Without this,
-   *     a user could fetch their own reminder under any pet's URL — confusing
-   *     for the client and a small inconsistency we don't want.
+  * Fetch a single reminder scoped to the already-authorized pet.
    */
-  async findByIdForOwnerAndPet(
+  async findByIdAndPet(
     reminderId: string | Types.ObjectId,
-    ownerId: Types.ObjectId,
     petId: Types.ObjectId,
   ): Promise<ReminderDocument | null> {
     if (!Types.ObjectId.isValid(reminderId)) return null;
-    return ReminderModel.findOne({ _id: reminderId, ownerId, petId }).exec();
+    return ReminderModel.findOne({ _id: reminderId, petId }).exec();
   },
 
   async create(data: CreateReminderData): Promise<ReminderDocument> {
     return ReminderModel.create(data);
   },
 
-  async updateForOwner(
+  async updateById(
     reminderId: string | Types.ObjectId,
-    ownerId: Types.ObjectId,
+    petId: Types.ObjectId,
     data: UpdateReminderData,
   ): Promise<ReminderDocument | null> {
     if (!Types.ObjectId.isValid(reminderId)) return null;
     return ReminderModel.findOneAndUpdate(
-      { _id: reminderId, ownerId },
+      { _id: reminderId, petId },
       { $set: data },
-      { new: true, runValidators: true },
+      { returnDocument: 'after', runValidators: true },
     ).exec();
   },
 
@@ -97,16 +86,16 @@ export const reminderRepository = {
    * Mark a one-time reminder complete. Only sets `completed`/`completedAt`.
    * Caller has already verified it's non-recurring.
    */
-  async markCompleted(
+  async markCompletedById(
     reminderId: string | Types.ObjectId,
-    ownerId: Types.ObjectId,
+    petId: Types.ObjectId,
     now: Date,
   ): Promise<ReminderDocument | null> {
     if (!Types.ObjectId.isValid(reminderId)) return null;
     return ReminderModel.findOneAndUpdate(
-      { _id: reminderId, ownerId },
+      { _id: reminderId, petId },
       { $set: { completed: true, completedAt: now } },
-      { new: true },
+      { returnDocument: 'after' },
     ).exec();
   },
 
@@ -114,30 +103,30 @@ export const reminderRepository = {
    * Advance a recurring reminder to its next occurrence. Sets `dueAt` and
    * `lastCompletedAt`. Keeps `completed: false`.
    */
-  async advanceRecurring(
+  async advanceRecurringById(
     reminderId: string | Types.ObjectId,
-    ownerId: Types.ObjectId,
+    petId: Types.ObjectId,
     nextDueAt: Date,
     nextNotifyAt: Date,
     now: Date,
   ): Promise<ReminderDocument | null> {
     if (!Types.ObjectId.isValid(reminderId)) return null;
     return ReminderModel.findOneAndUpdate(
-      { _id: reminderId, ownerId },
+      { _id: reminderId, petId },
       { $set: { dueAt: nextDueAt, notifyAt: nextNotifyAt, lastCompletedAt: now } },
-      { new: true },
+      { returnDocument: 'after' },
     ).exec();
   },
 
-  async softDeleteForOwner(
+  async softDeleteById(
     reminderId: string | Types.ObjectId,
-    ownerId: Types.ObjectId,
+    petId: Types.ObjectId,
   ): Promise<ReminderDocument | null> {
     if (!Types.ObjectId.isValid(reminderId)) return null;
     return ReminderModel.findOneAndUpdate(
-      { _id: reminderId, ownerId },
+      { _id: reminderId, petId },
       { $set: { deletedAt: new Date() } },
-      { new: true },
+      { returnDocument: 'after' },
     ).exec();
   },
 
@@ -147,14 +136,14 @@ export const reminderRepository = {
    *
    */
   async listUpcomingForPet(
-    ownerId: Types.ObjectId,
     petId: Types.ObjectId,
+    now: Date,
     limit: number,
   ): Promise<ReminderDocument[]> {
     return ReminderModel.find({
-      ownerId,
       petId,
       completed: false,
+      dueAt: { $lte: new Date(now.getTime() + 90 * 86_400_000) },
       // Include overdue reminders too — they're still "upcoming" from the
       // user's perspective (they need to do it). We sort by dueAt ascending
       // so the most overdue appear first.
@@ -172,13 +161,11 @@ export const reminderRepository = {
    * falls in the window.
    */
   async countDueWithinWeek(
-    ownerId: Types.ObjectId,
     petId: Types.ObjectId,
     now: Date,
   ): Promise<number> {
     const sevenDaysFromNow = new Date(now.getTime() + 7 * 86_400_000);
     return ReminderModel.countDocuments({
-      ownerId,
       petId,
       completed: false,
       dueAt: { $gte: now, $lt: sevenDaysFromNow },

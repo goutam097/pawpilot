@@ -13,6 +13,7 @@
 export interface SerializedPet {
   id: string;
   ownerId: string;
+  currentUserRole: 'owner' | 'admin' | 'caregiver' | 'viewer';
   name: string;
   species: 'dog' | 'cat' | 'other';
   breed: string | null;

@@ -8,6 +8,7 @@ import type {
   LoginInput,
   RefreshInput,
   UpdateProfileInput,
+  UpdatePreferencesInput,
 } from '../validators/authValidators.js';
 
 /**
@@ -91,6 +92,13 @@ export const authController = {
     const { userId } = req as AuthenticatedRequest;
     const input = req.body as UpdateProfileInput;
     const user = await authService.updateProfile(userId, input);
+    ok(res, { user: serializeUser(user) });
+  },
+
+  async updatePreferences(req: Request, res: Response): Promise<void> {
+    const { userId } = req as AuthenticatedRequest;
+    const input = req.body as UpdatePreferencesInput;
+    const user = await authService.updatePreferences(userId, input);
     ok(res, { user: serializeUser(user) });
   },
 };

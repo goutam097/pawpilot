@@ -64,7 +64,19 @@ export const authRepository = {
     return UserModel.findByIdAndUpdate(
       userId,
       { $set: { name } },
-      { new: true, runValidators: true },
+      { returnDocument: 'after', runValidators: true },
+    ).exec();
+  },
+
+  async updateUserPreferences(
+    userId: string | Types.ObjectId,
+    preferences: { analyticsOptOut: boolean },
+  ): Promise<UserDocument | null> {
+    if (!Types.ObjectId.isValid(userId)) return null;
+    return UserModel.findByIdAndUpdate(
+      userId,
+      { $set: preferences },
+      { returnDocument: 'after', runValidators: true },
     ).exec();
   },
 

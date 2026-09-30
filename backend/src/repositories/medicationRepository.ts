@@ -2,7 +2,7 @@ import { Types } from 'mongoose';
 import { MedicationModel, type MedicationDocument, type MedicationFrequency } from '../models/Medication.js';
 
 export interface CreateMedicationData {
-  ownerId: Types.ObjectId;
+  createdBy: Types.ObjectId;
   petId: Types.ObjectId;
   name: string;
   dosage: string | null;
@@ -29,13 +29,12 @@ export interface UpdateMedicationData {
 
 export const medicationRepository = {
   async listForPet(
-    ownerId: Types.ObjectId,
     petId: Types.ObjectId,
     onlyActive: boolean,
     now: Date,
     limit: number,
   ): Promise<MedicationDocument[]> {
-    const filter: Record<string, unknown> = { ownerId, petId };
+    const filter: Record<string, unknown> = { petId };
 
     if (onlyActive) {
       filter.startDate = { $lte: now };
@@ -48,41 +47,40 @@ export const medicationRepository = {
       .exec();
   },
 
-  async findByIdForOwnerAndPet(
+  async findByIdAndPet(
     medicationId: string | Types.ObjectId,
-    ownerId: Types.ObjectId,
     petId: Types.ObjectId,
   ): Promise<MedicationDocument | null> {
     if (!Types.ObjectId.isValid(medicationId)) return null;
-    return MedicationModel.findOne({ _id: medicationId, ownerId, petId }).exec();
+    return MedicationModel.findOne({ _id: medicationId, petId }).exec();
   },
 
   async create(data: CreateMedicationData): Promise<MedicationDocument> {
     return MedicationModel.create(data);
   },
 
-  async updateForOwner(
+  async updateById(
     medicationId: string | Types.ObjectId,
-    ownerId: Types.ObjectId,
+    petId: Types.ObjectId,
     data: UpdateMedicationData,
   ): Promise<MedicationDocument | null> {
     if (!Types.ObjectId.isValid(medicationId)) return null;
     return MedicationModel.findOneAndUpdate(
-      { _id: medicationId, ownerId },
+      { _id: medicationId, petId },
       { $set: data },
-      { new: true, runValidators: true },
+      { returnDocument: 'after', runValidators: true },
     ).exec();
   },
 
-  async softDeleteForOwner(
+  async softDeleteById(
     medicationId: string | Types.ObjectId,
-    ownerId: Types.ObjectId,
+    petId: Types.ObjectId,
   ): Promise<MedicationDocument | null> {
     if (!Types.ObjectId.isValid(medicationId)) return null;
     return MedicationModel.findOneAndUpdate(
-      { _id: medicationId, ownerId },
+      { _id: medicationId, petId },
       { $set: { deletedAt: new Date() } },
-      { new: true },
+      { returnDocument: 'after' },
     ).exec();
   },
 
@@ -95,12 +93,10 @@ export const medicationRepository = {
    * Used by the dashboard.
    */
   async countActiveForPet(
-    ownerId: Types.ObjectId,
     petId: Types.ObjectId,
     now: Date,
   ): Promise<number> {
     return MedicationModel.countDocuments({
-      ownerId,
       petId,
       startDate: { $lte: now },
       $or: [{ endDate: null }, { endDate: { $gte: now } }],

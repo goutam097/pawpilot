@@ -74,8 +74,13 @@ export const updateProfileSchema = z
     message: 'At least one field must be provided',
   });
 
+export const updatePreferencesSchema = z
+  .object({ analyticsOptOut: z.boolean() })
+  .strict();
+
 // Types inferred from the schemas — used by services and controllers.
 export type RegisterInput = z.infer<typeof registerSchema>;
 export type LoginInput = z.infer<typeof loginSchema>;
 export type RefreshInput = z.infer<typeof refreshSchema>;
 export type UpdateProfileInput = z.infer<typeof updateProfileSchema>;
+export type UpdatePreferencesInput = z.infer<typeof updatePreferencesSchema>;

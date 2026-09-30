@@ -35,7 +35,7 @@ let isRunning = false; // Prevent overlapping ticks if a tick takes > 60s
 
 interface DueReminder {
   _id: Types.ObjectId;
-  ownerId: Types.ObjectId;
+  createdBy: Types.ObjectId;
   petId: Types.ObjectId;
   title: string;
   description: string | null;
@@ -70,7 +70,7 @@ async function findDueReminders(now: Date): Promise<DueReminder[]> {
       ],
     },
   })
-    .select('_id ownerId petId title description dueAt')
+    .select('_id createdBy petId title description dueAt')
     .limit(BATCH_SIZE)
     .lean<DueReminder[]>()
     .exec();
@@ -121,7 +121,7 @@ export async function runNotifierTick(now: Date = new Date()): Promise<{
     try {
       // Fetch the reminder's owner's devices. Each reminder is scoped to
       // one user, and we send to all their valid devices.
-      const tokens = await deviceRepository.findValidForUser(reminder.ownerId);
+      const tokens = await deviceRepository.findValidForUser(reminder.createdBy);
 
       if (tokens.length === 0) {
         // No devices registered. Mark notified anyway so we don't retry

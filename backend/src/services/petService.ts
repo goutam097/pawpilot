@@ -1,34 +1,47 @@
 import { Types } from 'mongoose';
 import { petRepository, type CreatePetData, type UpdatePetData } from '../repositories/petRepository.js';
+import { PetModel, type PetDocument } from '../models/Pet.js';
+import { FamilyMemberModel } from '../models/FamilyMember.js';
 import { AppError } from '../utils/AppError.js';
 import { HTTP_STATUS } from '../constants/httpStatus.js';
 import { ERROR_CODES } from '../constants/errorCodes.js';
-import type { PetDocument } from '../models/Pet.js';
+import { require as requirePermission, getAccess, getRolesForPets } from './petPermissionsService.js';
+import { createOwnerMembership } from './memberService.js';
+import type { PetRole } from '../models/FamilyMember.js';
+import type { SerializedPet } from '../types/serialized.js';
 import type {
   CreatePetInput,
   UpdatePetInput,
   ListPetsQuery,
 } from '../validators/petValidators.js';
-import type { SerializedPet } from '../types/serialized.js';
 
 /**
- * Pet service — business rules for pets.
+ * Pet service.
  *
- * Ownership is enforced here in two ways:
- * - Lists and single-fetches pass `ownerId` into the repository, so the
- *   query itself only returns the user's pets.
- * - Mutations do the same. A missing result becomes PET_NOT_FOUND (404),
- *   never 403 — we don't reveal whether a pet id exists for another user.
- *
- * Soft delete, archive, and validation are coordinated here. The repository
- * stays mechanically simple.
+ * After Phase 21:
+ * - Pet CRUD authorizes via petPermissions.
+ * - The pets list includes all pets the user has access to (owned + member).
+ * - The serializer includes `currentUserRole`.
  */
 
-/** Serialize a pet document into the API's public shape. */
-/* export function serializePet(pet: PetDocument) {
+function toObjectId(id: string, fieldName = 'id'): Types.ObjectId {
+  if (!Types.ObjectId.isValid(id)) {
+    throw new AppError(`Invalid ${fieldName}`, HTTP_STATUS.BAD_REQUEST, ERROR_CODES.VALIDATION_ERROR);
+  }
+  return new Types.ObjectId(id);
+}
+
+/**
+ * Serialize a pet for API responses.
+ *
+ * `currentUserRole` is required and reflects the requesting user's role on
+ * the pet. The mobile app uses it to show/hide actions.
+ */
+export function serializePet(pet: PetDocument, currentUserRole: PetRole): SerializedPet {
   return {
     id: pet._id.toString(),
     ownerId: pet.ownerId.toString(),
+    currentUserRole,
     name: pet.name,
     species: pet.species,
     breed: pet.breed ?? null,
@@ -44,68 +57,11 @@ import type { SerializedPet } from '../types/serialized.js';
     createdAt: pet.createdAt.toISOString(),
     updatedAt: pet.updatedAt.toISOString(),
   };
-} */
-
-/**
- * Serialize a pet document into the API's public shape.
- */
-export function serializePet(pet: PetDocument): SerializedPet {
-  const petDoc = pet as unknown as {
-    _id: { toString(): string };
-    ownerId?: { toString(): string } | null;
-    name?: string | null;
-    species?: 'dog' | 'cat' | 'other' | null;
-    breed?: string | null;
-    gender?: 'male' | 'female' | 'unknown' | null;
-    dateOfBirth?: Date | null;
-    weight?: number | null;
-    weightUnit?: 'kg' | 'lb' | null;
-    color?: string | null;
-    microchipNumber?: string | null;
-    notes?: string | null;
-    photoUrl?: string | null;
-    archivedAt?: Date | null;
-    createdAt?: Date;
-    updatedAt?: Date;
-  };
-
-  return {
-    id: petDoc._id.toString(),
-    ownerId: petDoc.ownerId?.toString() ?? '',
-    name: petDoc.name ?? '',
-    species: petDoc.species ?? 'other',
-    breed: petDoc.breed ?? null,
-    gender: petDoc.gender ?? 'unknown',
-    dateOfBirth: petDoc.dateOfBirth ? petDoc.dateOfBirth.toISOString() : null,
-    weight: petDoc.weight ?? null,
-    weightUnit: petDoc.weightUnit ?? 'kg',
-    color: petDoc.color ?? null,
-    microchipNumber: petDoc.microchipNumber ?? null,
-    notes: petDoc.notes ?? null,
-    photoUrl: petDoc.photoUrl ?? null,
-    archivedAt: petDoc.archivedAt ? petDoc.archivedAt.toISOString() : null,
-    createdAt: petDoc.createdAt ? petDoc.createdAt.toISOString() : new Date(0).toISOString(),
-    updatedAt: petDoc.updatedAt ? petDoc.updatedAt.toISOString() : new Date(0).toISOString(),
-  };
-}
-
-function toObjectId(userId: string): Types.ObjectId {
-  if (!Types.ObjectId.isValid(userId)) {
-    // This should never happen — userId comes from a verified JWT subject.
-    // But if it did, we'd want a clear 401, not a CastError.
-    throw new AppError('Invalid user session', HTTP_STATUS.UNAUTHORIZED, ERROR_CODES.UNAUTHORIZED);
-  }
-  return new Types.ObjectId(userId);
-}
-
-/** Standard "pet not found" error. Never reveals ownership vs non-existence. */
-function petNotFoundError(): AppError {
-  return new AppError('Pet not found', HTTP_STATUS.NOT_FOUND, ERROR_CODES.PET_NOT_FOUND);
 }
 
 export const petService = {
   async create(userId: string, input: CreatePetInput): Promise<PetDocument> {
-    const ownerId = toObjectId(userId);
+    const ownerId = toObjectId(userId, 'userId');
 
     const data: CreatePetData = {
       ownerId,
@@ -122,23 +78,68 @@ export const petService = {
       photoUrl: input.photoUrl ?? null,
     };
 
-    return petRepository.create(data);
-  },
+    const pet = await petRepository.create(data);
 
-  async list(userId: string, query: ListPetsQuery): Promise<PetDocument[]> {
-    const ownerId = toObjectId(userId);
-    return petRepository.listForOwner({
-      ownerId,
-      includeArchived: query.includeArchived ?? false,
-      limit: query.limit ?? 50,
-    });
-  },
+    // Create the owner's FamilyMember record. From this point on, access is
+    // resolved via FamilyMember.
+    await createOwnerMembership(pet._id, ownerId);
 
-  async getOne(userId: string, petId: string): Promise<PetDocument> {
-    const ownerId = toObjectId(userId);
-    const pet = await petRepository.findByIdForOwner(petId, ownerId);
-    if (!pet) throw petNotFoundError();
     return pet;
+  },
+
+  /**
+   * List all pets the user has access to (owned or member of).
+   *
+   * Returns pets and their roles. The caller (controller) serializes each
+   * with its role.
+   */
+  async list(
+    userId: string,
+    query: ListPetsQuery,
+  ): Promise<Array<{ pet: PetDocument; role: PetRole }>> {
+    const userObjectId = toObjectId(userId, 'userId');
+
+    const [memberships, ownedPets] = await Promise.all([
+      FamilyMemberModel.find({ userId: userObjectId }).select('petId role').lean().exec(),
+      PetModel.find({ ownerId: userObjectId }).select('_id').lean().exec(),
+    ]);
+
+    const petIdsByString = new Map<string, Types.ObjectId>();
+    for (const member of memberships) petIdsByString.set(member.petId.toString(), member.petId);
+    for (const pet of ownedPets) petIdsByString.set(pet._id.toString(), pet._id);
+    const petIds = [...petIdsByString.values()];
+    if (petIds.length === 0) return [];
+
+    const roleMap = new Map<string, PetRole>();
+    for (const m of memberships) {
+      roleMap.set(m.petId.toString(), m.role as PetRole);
+    }
+    for (const pet of ownedPets) {
+      if (!roleMap.has(pet._id.toString())) roleMap.set(pet._id.toString(), 'owner');
+    }
+
+    // Fetch the pets themselves.
+    const filter: Record<string, unknown> = {
+      _id: { $in: petIds },
+    };
+    if (!query.includeArchived) {
+      filter.archivedAt = null;
+    }
+
+    const pets = await PetModel.find(filter)
+      .sort({ createdAt: -1 })
+      .limit(query.limit ?? 50)
+      .exec();
+
+    return pets.map((pet) => ({
+      pet,
+      role: roleMap.get(pet._id.toString()) ?? 'viewer',
+    }));
+  },
+
+  async getOne(userId: string, petId: string): Promise<{ pet: PetDocument; role: PetRole }> {
+    const access = await requirePermission(userId, petId, 'pet:read');
+    return { pet: access.pet, role: access.role };
   },
 
   async update(
@@ -146,10 +147,9 @@ export const petService = {
     petId: string,
     input: UpdatePetInput,
   ): Promise<PetDocument> {
-    const ownerId = toObjectId(userId);
+    const access = await requirePermission(userId, petId, 'pet:update');
 
     const update: UpdatePetData = {};
-
     if (input.name !== undefined) update.name = input.name;
     if (input.species !== undefined) update.species = input.species;
     if (input.breed !== undefined) update.breed = input.breed ?? null;
@@ -163,8 +163,10 @@ export const petService = {
     if (input.photoUrl !== undefined) update.photoUrl = input.photoUrl ?? null;
     if (input.archived !== undefined) update.archivedAt = input.archived ? new Date() : null;
 
-    const pet = await petRepository.updateForOwner(petId, ownerId, update);
-    if (!pet) throw petNotFoundError();
+    const pet = await petRepository.updateById(access.pet._id, update);
+    if (!pet) {
+      throw new AppError('Pet not found', HTTP_STATUS.NOT_FOUND, ERROR_CODES.PET_NOT_FOUND);
+    }
     return pet;
   },
 
@@ -177,8 +179,10 @@ export const petService = {
   },
 
   async softDelete(userId: string, petId: string): Promise<void> {
-    const ownerId = toObjectId(userId);
-    const pet = await petRepository.softDeleteForOwner(petId, ownerId);
-    if (!pet) throw petNotFoundError();
+    const access = await requirePermission(userId, petId, 'pet:delete');
+    await petRepository.softDeleteById(access.pet._id);
   },
 };
+
+// Re-export for other services that need role-aware pet listing.
+export { getAccess, getRolesForPets };

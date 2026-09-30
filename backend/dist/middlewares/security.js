@@ -93,4 +93,26 @@ export const authRateLimiter = rateLimit({
         fail(res, 'Too many authentication attempts, please try again later.', HTTP_STATUS.TOO_MANY_REQUESTS, ERROR_CODES.RATE_LIMITED);
     },
 });
+/**
+ * Public rate limiter — used for unauthenticated HTML/JSON pages.
+ *
+ * Rationale:
+ * - Higher than authRateLimiter (10/15min) because a legitimate user might
+ *   refresh a page a few times.
+ * - Lower than globalRateLimiter (300/15min) because public endpoints don't
+ *   need burst capacity.
+ * - Applies per IP.
+ */
+export const publicRateLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 60,
+    standardHeaders: 'draft-7',
+    legacyHeaders: false,
+    handler: (_req, res) => {
+        res
+            .status(429)
+            .type('text/html')
+            .send('<!DOCTYPE html><html><head><title>Too many requests</title></head><body style="font-family: sans-serif; padding: 40px; max-width: 600px; margin: 0 auto;"><h1>Too many requests</h1><p>Please try again in a few minutes.</p></body></html>');
+    },
+});
 //# sourceMappingURL=security.js.map

@@ -12,7 +12,7 @@ import { WeightRecordModel } from '../models/WeightRecord.js';
 export interface LeanWeightRecord {
   _id: Types.ObjectId;
   petId: Types.ObjectId;
-  ownerId: Types.ObjectId;
+  createdBy: Types.ObjectId;
   weight: number;
   unit: 'kg' | 'lb';
   recordedAt: Date;
@@ -23,16 +23,13 @@ export interface LeanWeightRecord {
 
 export const petDashboardRepository = {
   /**
-   * Fetch the latest N weight records for a pet owned by this user.
-   * Returns [] if the pet isn't owned by the user — the ownerId filter
-   * enforces this at the query level.
+  * Fetch the latest N weight records for a pet after service authorization.
    */
   async latestWeightRecords(
-    ownerId: Types.ObjectId,
     petId: Types.ObjectId,
     limit: number,
   ): Promise<LeanWeightRecord[]> {
-    const records = await WeightRecordModel.find({ ownerId, petId })
+    const records = await WeightRecordModel.find({ petId })
       .sort({ recordedAt: -1 })
       .limit(limit)
       .lean()

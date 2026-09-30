@@ -14,6 +14,7 @@ import type {
   RegisterInput,
   LoginInput,
   UpdateProfileInput,
+  UpdatePreferencesInput,
 } from '../validators/authValidators.js';
 import type { UserDocument } from '../models/User.js';
 
@@ -52,6 +53,7 @@ export function serializeUser(user: UserDocument) {
     id: user._id.toString(),
     email: user.email,
     name: user.name,
+    analyticsOptOut: user.analyticsOptOut,
     createdAt: user.createdAt,
     updatedAt: user.updatedAt,
   };
@@ -224,6 +226,17 @@ export const authService = {
       throw new AppError('No fields to update', HTTP_STATUS.BAD_REQUEST, ERROR_CODES.VALIDATION_ERROR);
     }
     const updated = await authRepository.updateUserName(userId, input.name);
+    if (!updated) {
+      throw new AppError('User not found', HTTP_STATUS.NOT_FOUND, ERROR_CODES.UNAUTHORIZED);
+    }
+    return updated;
+  },
+
+  async updatePreferences(
+    userId: string,
+    input: UpdatePreferencesInput,
+  ): Promise<UserDocument> {
+    const updated = await authRepository.updateUserPreferences(userId, input);
     if (!updated) {
       throw new AppError('User not found', HTTP_STATUS.NOT_FOUND, ERROR_CODES.UNAUTHORIZED);
     }

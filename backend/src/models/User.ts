@@ -1,4 +1,14 @@
-import { Schema, model, type InferSchemaType, type HydratedDocument, type Model } from 'mongoose';
+import { Schema, model, type HydratedDocument, type Model } from 'mongoose';
+
+export interface User {
+  email: string;
+  passwordHash: string;
+  name: string;
+  analyticsOptOut: boolean;
+  passwordChangedAt: Date | null;
+  createdAt: Date;
+  updatedAt: Date;
+}
 
 /**
  * User schema.
@@ -17,7 +27,7 @@ import { Schema, model, type InferSchemaType, type HydratedDocument, type Model 
  *   for optimistic concurrency; if we ever do, re-enable it.
  * - We do NOT store `password` (plaintext), ever. Only the hash.
  */
-const userSchema = new Schema(
+const userSchema = new Schema<User>(
   {
     email: {
       type: String,
@@ -37,6 +47,10 @@ const userSchema = new Schema(
       required: true,
       trim: true,
       maxlength: 100,
+    },
+    analyticsOptOut: {
+      type: Boolean,
+      default: false,
     },
     // Used to invalidate refresh tokens if a password changes (Phase 21+).
     // For now it's just the creation timestamp placeholder we can increment.
@@ -63,7 +77,6 @@ const userSchema = new Schema(
 // Compound index used by future queries (e.g. "list newest users").
 userSchema.index({ createdAt: -1 });
 
-export type User = InferSchemaType<typeof userSchema>;
 export type UserDocument = HydratedDocument<User>;
 export type UserModel = Model<User>;
 

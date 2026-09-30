@@ -4,11 +4,11 @@ import {
   type CreateMedicationData,
   type UpdateMedicationData,
 } from '../repositories/medicationRepository.js';
-import { petRepository } from '../repositories/petRepository.js';
 import { ReminderModel } from '../models/Reminder.js';
 import { AppError } from '../utils/AppError.js';
 import { HTTP_STATUS } from '../constants/httpStatus.js';
 import { ERROR_CODES } from '../constants/errorCodes.js';
+import { require as requirePermission } from './petPermissionsService.js';
 import type { MedicationDocument, MedicationFrequency } from '../models/Medication.js';
 import type {
   CreateMedicationInput,
@@ -59,19 +59,18 @@ export function serializeMedication(m: MedicationDocument) {
   };
 }
 
-async function verifyPetOwnership(userId: string, petId: string): Promise<Types.ObjectId> {
-  const ownerId = toObjectId(userId, 'userId');
-  const petObjectId = toObjectId(petId, 'petId');
-  const pet = await petRepository.findByIdForOwner(petObjectId, ownerId);
-  if (!pet) {
-    throw new AppError('Pet not found', HTTP_STATUS.NOT_FOUND, ERROR_CODES.PET_NOT_FOUND);
-  }
-  return petObjectId;
+async function requirePetAccess(
+  userId: string,
+  petId: string,
+  permission: 'records:read' | 'records:write' | 'records:delete',
+): Promise<Types.ObjectId> {
+  const access = await requirePermission(userId, petId, permission);
+  return access.pet._id;
 }
 
-async function findLinkedReminder(ownerId: Types.ObjectId, medicationId: Types.ObjectId) {
+async function findLinkedReminder(petId: Types.ObjectId, medicationId: Types.ObjectId) {
   return ReminderModel.findOne({
-    ownerId,
+    petId,
     sourceType: 'medication',
     sourceId: medicationId,
   }).exec();
@@ -103,7 +102,7 @@ async function createLinkedReminder(
   const notifyAt = dueAt;
 
   await ReminderModel.create({
-    ownerId,
+    createdBy: ownerId,
     petId,
     title: copy.title,
     description: copy.description,
@@ -143,31 +142,31 @@ async function updateLinkedReminder(
   );
 }
 
-async function deleteLinkedReminder(reminderId: Types.ObjectId): Promise<void> {
+async function deleteLinkedReminder(reminderId: Types.ObjectId, petId: Types.ObjectId): Promise<void> {
   await ReminderModel.updateOne(
-    { _id: reminderId },
+    { _id: reminderId, petId },
     { $set: { deletedAt: new Date() } },
   );
 }
 
 async function reconcileLinkedReminder(
-  ownerId: Types.ObjectId,
+  createdBy: Types.ObjectId,
   petId: Types.ObjectId,
   medication: MedicationDocument,
 ): Promise<void> {
   const shouldHaveReminder =
     medication.notificationsEnabled && medication.frequency !== 'as_needed';
 
-  const existingReminder = await findLinkedReminder(ownerId, medication._id);
+  const existingReminder = await findLinkedReminder(petId, medication._id);
 
   if (shouldHaveReminder) {
     if (existingReminder) {
       await updateLinkedReminder(existingReminder._id, medication);
     } else {
-      await createLinkedReminder(ownerId, petId, medication);
+      await createLinkedReminder(createdBy, petId, medication);
     }
   } else if (existingReminder) {
-    await deleteLinkedReminder(existingReminder._id);
+    await deleteLinkedReminder(existingReminder._id, petId);
   }
 }
 
@@ -177,10 +176,8 @@ export const medicationService = {
     petId: string,
     query: ListMedicationsQuery,
   ): Promise<MedicationDocument[]> {
-    const petObjectId = await verifyPetOwnership(userId, petId);
-    const ownerId = toObjectId(userId, 'userId');
+    const petObjectId = await requirePetAccess(userId, petId, 'records:read');
     return medicationRepository.listForPet(
-      ownerId,
       petObjectId,
       query.active ?? false,
       new Date(),
@@ -193,13 +190,8 @@ export const medicationService = {
     petId: string,
     medicationId: string,
   ): Promise<MedicationDocument> {
-    const petObjectId = await verifyPetOwnership(userId, petId);
-    const ownerId = toObjectId(userId, 'userId');
-    const medication = await medicationRepository.findByIdForOwnerAndPet(
-      medicationId,
-      ownerId,
-      petObjectId,
-    );
+    const petObjectId = await requirePetAccess(userId, petId, 'records:read');
+    const medication = await medicationRepository.findByIdAndPet(medicationId, petObjectId);
     if (!medication) throw medicationNotFound();
     return medication;
   },
@@ -209,11 +201,11 @@ export const medicationService = {
     petId: string,
     input: CreateMedicationInput,
   ): Promise<MedicationDocument> {
-    const petObjectId = await verifyPetOwnership(userId, petId);
-    const ownerId = toObjectId(userId, 'userId');
+    const petObjectId = await requirePetAccess(userId, petId, 'records:write');
+    const createdBy = toObjectId(userId, 'userId');
 
     const data: CreateMedicationData = {
-      ownerId,
+      createdBy,
       petId: petObjectId,
       name: input.name,
       dosage: input.dosage ?? null,
@@ -229,7 +221,7 @@ export const medicationService = {
     const medication = await medicationRepository.create(data);
 
     if (medication.notificationsEnabled && medication.frequency !== 'as_needed') {
-      await createLinkedReminder(ownerId, petObjectId, medication);
+      await createLinkedReminder(createdBy, petObjectId, medication);
     }
 
     return medication;
@@ -241,14 +233,10 @@ export const medicationService = {
     medicationId: string,
     input: UpdateMedicationInput,
   ): Promise<MedicationDocument> {
-    const petObjectId = await verifyPetOwnership(userId, petId);
-    const ownerId = toObjectId(userId, 'userId');
+    const petObjectId = await requirePetAccess(userId, petId, 'records:write');
+    const createdBy = toObjectId(userId, 'userId');
 
-    const existing = await medicationRepository.findByIdForOwnerAndPet(
-      medicationId,
-      ownerId,
-      petObjectId,
-    );
+    const existing = await medicationRepository.findByIdAndPet(medicationId, petObjectId);
     if (!existing) throw medicationNotFound();
 
     const update: UpdateMedicationData = {};
@@ -272,30 +260,25 @@ export const medicationService = {
       );
     }
 
-    const updated = await medicationRepository.updateForOwner(medicationId, ownerId, update);
+    const updated = await medicationRepository.updateById(medicationId, petObjectId, update);
     if (!updated) throw medicationNotFound();
 
-    await reconcileLinkedReminder(ownerId, petObjectId, updated);
+    await reconcileLinkedReminder(createdBy, petObjectId, updated);
 
     return updated;
   },
 
   async remove(userId: string, petId: string, medicationId: string): Promise<void> {
-    const petObjectId = await verifyPetOwnership(userId, petId);
-    const ownerId = toObjectId(userId, 'userId');
+    const petObjectId = await requirePetAccess(userId, petId, 'records:delete');
 
-    const existing = await medicationRepository.findByIdForOwnerAndPet(
-      medicationId,
-      ownerId,
-      petObjectId,
-    );
+    const existing = await medicationRepository.findByIdAndPet(medicationId, petObjectId);
     if (!existing) throw medicationNotFound();
 
-    const linkedReminder = await findLinkedReminder(ownerId, existing._id);
+    const linkedReminder = await findLinkedReminder(petObjectId, existing._id);
     if (linkedReminder) {
-      await deleteLinkedReminder(linkedReminder._id);
+      await deleteLinkedReminder(linkedReminder._id, petObjectId);
     }
 
-    await medicationRepository.softDeleteForOwner(medicationId, ownerId);
+    await medicationRepository.softDeleteById(medicationId, petObjectId);
   },
 };

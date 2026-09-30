@@ -4,11 +4,11 @@ import {
   type CreateVaccinationData,
   type UpdateVaccinationData,
 } from '../repositories/vaccinationRepository.js';
-import { petRepository } from '../repositories/petRepository.js';
 import { ReminderModel } from '../models/Reminder.js';
 import { AppError } from '../utils/AppError.js';
 import { HTTP_STATUS } from '../constants/httpStatus.js';
 import { ERROR_CODES } from '../constants/errorCodes.js';
+import { require as requirePermission } from './petPermissionsService.js';
 import type { VaccinationDocument } from '../models/Vaccination.js';
 import type {
   CreateVaccinationInput,
@@ -82,14 +82,10 @@ export function serializeVaccination(v: VaccinationDocument) {
 async function verifyPetOwnership(
   userId: string,
   petId: string,
+  permission: 'records:read' | 'records:write' | 'records:delete',
 ): Promise<Types.ObjectId> {
-  const ownerId = toObjectId(userId, 'userId');
-  const petObjectId = toObjectId(petId, 'petId');
-  const pet = await petRepository.findByIdForOwner(petObjectId, ownerId);
-  if (!pet) {
-    throw new AppError('Pet not found', HTTP_STATUS.NOT_FOUND, ERROR_CODES.PET_NOT_FOUND);
-  }
-  return petObjectId;
+  const access = await requirePermission(userId, petId, permission);
+  return access.pet._id;
 }
 
 /**
@@ -97,11 +93,11 @@ async function verifyPetOwnership(
  * Uses the sourceType/sourceId index.
  */
 async function findLinkedReminder(
-  ownerId: Types.ObjectId,
+  petId: Types.ObjectId,
   vaccinationId: Types.ObjectId,
 ) {
   return ReminderModel.findOne({
-    ownerId,
+    petId,
     sourceType: 'vaccination',
     sourceId: vaccinationId,
   }).exec();
@@ -119,7 +115,7 @@ async function createLinkedReminder(
   if (!vaccination.nextDueAt) return;
 
   await ReminderModel.create({
-    ownerId,
+    createdBy: ownerId,
     petId,
     title: `${vaccination.vaccineName} due`,
     description: `Next dose for ${vaccination.vaccineName}.`,
@@ -139,10 +135,11 @@ async function createLinkedReminder(
  */
 async function updateLinkedReminder(
   reminderId: Types.ObjectId,
+  petId: Types.ObjectId,
   nextDueAt: Date,
 ): Promise<void> {
   await ReminderModel.updateOne(
-    { _id: reminderId },
+    { _id: reminderId, petId },
     {
       $set: {
         dueAt: nextDueAt,
@@ -158,9 +155,9 @@ async function updateLinkedReminder(
 /**
  * Soft-delete a linked reminder.
  */
-async function deleteLinkedReminder(reminderId: Types.ObjectId): Promise<void> {
+async function deleteLinkedReminder(reminderId: Types.ObjectId, petId: Types.ObjectId): Promise<void> {
   await ReminderModel.updateOne(
-    { _id: reminderId },
+    { _id: reminderId, petId },
     { $set: { deletedAt: new Date() } },
   );
 }
@@ -171,9 +168,8 @@ export const vaccinationService = {
     petId: string,
     query: ListVaccinationsQuery,
   ): Promise<VaccinationDocument[]> {
-    const petObjectId = await verifyPetOwnership(userId, petId);
-    const ownerId = toObjectId(userId, 'userId');
-    return vaccinationRepository.listForPet(ownerId, petObjectId, query.limit ?? 100);
+    const petObjectId = await verifyPetOwnership(userId, petId, 'records:read');
+    return vaccinationRepository.listForPet(petObjectId, query.limit ?? 100);
   },
 
   async getOne(
@@ -181,13 +177,8 @@ export const vaccinationService = {
     petId: string,
     vaccinationId: string,
   ): Promise<VaccinationDocument> {
-    const petObjectId = await verifyPetOwnership(userId, petId);
-    const ownerId = toObjectId(userId, 'userId');
-    const vaccination = await vaccinationRepository.findByIdForOwnerAndPet(
-      vaccinationId,
-      ownerId,
-      petObjectId,
-    );
+    const petObjectId = await verifyPetOwnership(userId, petId, 'records:read');
+    const vaccination = await vaccinationRepository.findByIdAndPet(vaccinationId, petObjectId);
     if (!vaccination) throw vaccinationNotFound();
     return vaccination;
   },
@@ -197,11 +188,11 @@ export const vaccinationService = {
     petId: string,
     input: CreateVaccinationInput,
   ): Promise<VaccinationDocument> {
-    const petObjectId = await verifyPetOwnership(userId, petId);
-    const ownerId = toObjectId(userId, 'userId');
+    const petObjectId = await verifyPetOwnership(userId, petId, 'records:write');
+    const createdBy = toObjectId(userId, 'userId');
 
     const data: CreateVaccinationData = {
-      ownerId,
+      createdBy,
       petId: petObjectId,
       vaccineName: input.vaccineName,
       givenAt: input.givenAt,
@@ -216,7 +207,7 @@ export const vaccinationService = {
 
     // Create the linked reminder if applicable.
     if (vaccination.createReminder && vaccination.nextDueAt) {
-      await createLinkedReminder(ownerId, petObjectId, vaccination);
+      await createLinkedReminder(createdBy, petObjectId, vaccination);
     }
 
     return vaccination;
@@ -228,14 +219,10 @@ export const vaccinationService = {
     vaccinationId: string,
     input: UpdateVaccinationInput,
   ): Promise<VaccinationDocument> {
-    const petObjectId = await verifyPetOwnership(userId, petId);
-    const ownerId = toObjectId(userId, 'userId');
+    const petObjectId = await verifyPetOwnership(userId, petId, 'records:write');
+    const createdBy = toObjectId(userId, 'userId');
 
-    const existing = await vaccinationRepository.findByIdForOwnerAndPet(
-      vaccinationId,
-      ownerId,
-      petObjectId,
-    );
+    const existing = await vaccinationRepository.findByIdAndPet(vaccinationId, petObjectId);
     if (!existing) throw vaccinationNotFound();
 
     // Build the update payload.
@@ -262,40 +249,35 @@ export const vaccinationService = {
       );
     }
 
-    const updated = await vaccinationRepository.updateForOwner(
+    const updated = await vaccinationRepository.updateById(
       vaccinationId,
-      ownerId,
+      petObjectId,
       update,
     );
     if (!updated) throw vaccinationNotFound();
 
     // Reconcile the linked reminder with the new state.
-    await reconcileLinkedReminder(ownerId, petObjectId, updated, existing);
+    await reconcileLinkedReminder(createdBy, petObjectId, updated, existing);
 
     return updated;
   },
 
   async remove(userId: string, petId: string, vaccinationId: string): Promise<void> {
-    const petObjectId = await verifyPetOwnership(userId, petId);
-    const ownerId = toObjectId(userId, 'userId');
+    const petObjectId = await verifyPetOwnership(userId, petId, 'records:delete');
 
-    const existing = await vaccinationRepository.findByIdForOwnerAndPet(
-      vaccinationId,
-      ownerId,
-      petObjectId,
-    );
+    const existing = await vaccinationRepository.findByIdAndPet(vaccinationId, petObjectId);
     if (!existing) throw vaccinationNotFound();
 
     // Delete the linked reminder first (or after — order doesn't matter
     // much, but doing it first means a failure leaves us in a clean state
     // where the reminder is gone and the vaccination remains, which the
     // user can retry).
-    const linkedReminder = await findLinkedReminder(ownerId, existing._id);
+    const linkedReminder = await findLinkedReminder(petObjectId, existing._id);
     if (linkedReminder) {
-      await deleteLinkedReminder(linkedReminder._id);
+      await deleteLinkedReminder(linkedReminder._id, petObjectId);
     }
 
-    await vaccinationRepository.softDeleteForOwner(vaccinationId, ownerId);
+    await vaccinationRepository.softDeleteById(vaccinationId, petObjectId);
   },
 };
 
@@ -312,13 +294,13 @@ export const vaccinationService = {
  * - If !shouldHaveReminder and no reminder: no-op.
  */
 async function reconcileLinkedReminder(
-  ownerId: Types.ObjectId,
+  createdBy: Types.ObjectId,
   petId: Types.ObjectId,
   updated: VaccinationDocument,
   previous: VaccinationDocument,
 ): Promise<void> {
   const shouldHaveReminder = updated.createReminder && !!updated.nextDueAt;
-  const existingReminder = await findLinkedReminder(ownerId, updated._id);
+  const existingReminder = await findLinkedReminder(petId, updated._id);
 
   if (shouldHaveReminder) {
     if (existingReminder) {
@@ -329,7 +311,7 @@ async function reconcileLinkedReminder(
         previous.nextDueAt.getTime() !== updated.nextDueAt.getTime();
 
       if (dueChanged && updated.nextDueAt) {
-        await updateLinkedReminder(existingReminder._id, updated.nextDueAt);
+        await updateLinkedReminder(existingReminder._id, petId, updated.nextDueAt);
       }
 
       // Also update the title if the vaccine name changed.
@@ -340,9 +322,9 @@ async function reconcileLinkedReminder(
         );
       }
     } else if (updated.nextDueAt) {
-      await createLinkedReminder(ownerId, petId, updated);
+      await createLinkedReminder(createdBy, petId, updated);
     }
   } else if (existingReminder) {
-    await deleteLinkedReminder(existingReminder._id);
+    await deleteLinkedReminder(existingReminder._id, petId);
   }
 }

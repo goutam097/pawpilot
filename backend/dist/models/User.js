@@ -36,6 +36,10 @@ const userSchema = new Schema({
         trim: true,
         maxlength: 100,
     },
+    analyticsOptOut: {
+        type: Boolean,
+        default: false,
+    },
     // Used to invalidate refresh tokens if a password changes (Phase 21+).
     // For now it's just the creation timestamp placeholder we can increment.
     passwordChangedAt: {

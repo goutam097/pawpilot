@@ -17,12 +17,12 @@ import {
  *   specific booster given after a bite, per state protocol).
  *
  * Ownership:
- * - `ownerId` is denormalized from the pet for direct scoping.
+ * - `createdBy` records who created the vaccination.
  * - `petId` scopes the record to a specific pet.
  * - A reminder can be linked via sourceType/sourceId — see Reminder model.
  */
 export interface Vaccination {
-  ownerId: Types.ObjectId;
+  createdBy: Types.ObjectId;
   petId: Types.ObjectId;
   vaccineName: string;
   givenAt: Date;
@@ -38,7 +38,7 @@ export interface Vaccination {
 
 const vaccinationSchema = new Schema<Vaccination>(
   {
-    ownerId: {
+    createdBy: {
       type: Schema.Types.ObjectId,
       ref: 'User',
       required: true,
@@ -136,8 +136,7 @@ vaccinationSchema.index({ petId: 1, givenAt: -1 });
  * Dashboard health query: "latest vaccination for this pet" and
  * "earliest future nextDueAt."
  */
-vaccinationSchema.index({ ownerId: 1, petId: 1, givenAt: -1 });
-vaccinationSchema.index({ ownerId: 1, petId: 1, nextDueAt: 1 });
+vaccinationSchema.index({ petId: 1, nextDueAt: 1 });
 
 /**
  * Same soft-delete enforcement as other models.

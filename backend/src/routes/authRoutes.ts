@@ -9,6 +9,7 @@ import {
   loginSchema,
   refreshSchema,
   updateProfileSchema,
+  updatePreferencesSchema,
 } from '../validators/authValidators.js';
 
 /**
@@ -64,4 +65,11 @@ authRouter.patch(
   authenticate,
   validateBody(updateProfileSchema),
   asyncHandler(authController.updateProfile),
+);
+
+authRouter.patch(
+  '/me/preferences',
+  authenticate,
+  validateBody(updatePreferencesSchema),
+  asyncHandler(authController.updatePreferences),
 );

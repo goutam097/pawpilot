@@ -31,7 +31,7 @@ export const deviceRepository = {
           invalidatedAt: null,
         },
       },
-      { upsert: true, new: true, setDefaultsOnInsert: true },
+      { upsert: true, returnDocument: 'after', setDefaultsOnInsert: true },
     ).exec();
   },
 

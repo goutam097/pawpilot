@@ -77,7 +77,7 @@ async function createLinkedReminder(ownerId, petId, medication) {
     const notifyAtOffsetMinutes = 0;
     const notifyAt = dueAt;
     await ReminderModel.create({
-        ownerId,
+        createdBy: ownerId,
         petId,
         title: copy.title,
         description: copy.description,

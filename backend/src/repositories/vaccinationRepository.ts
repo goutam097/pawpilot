@@ -2,7 +2,7 @@ import { Types } from 'mongoose';
 import { VaccinationModel, type VaccinationDocument } from '../models/Vaccination.js';
 
 export interface CreateVaccinationData {
-  ownerId: Types.ObjectId;
+  createdBy: Types.ObjectId;
   petId: Types.ObjectId;
   vaccineName: string;
   givenAt: Date;
@@ -25,51 +25,49 @@ export interface UpdateVaccinationData {
 
 export const vaccinationRepository = {
   async listForPet(
-    ownerId: Types.ObjectId,
     petId: Types.ObjectId,
     limit: number,
   ): Promise<VaccinationDocument[]> {
-    return VaccinationModel.find({ ownerId, petId })
+    return VaccinationModel.find({ petId })
       .sort({ givenAt: -1 })
       .limit(limit)
       .exec();
   },
 
-  async findByIdForOwnerAndPet(
+  async findByIdAndPet(
     vaccinationId: string | Types.ObjectId,
-    ownerId: Types.ObjectId,
     petId: Types.ObjectId,
   ): Promise<VaccinationDocument | null> {
     if (!Types.ObjectId.isValid(vaccinationId)) return null;
-    return VaccinationModel.findOne({ _id: vaccinationId, ownerId, petId }).exec();
+    return VaccinationModel.findOne({ _id: vaccinationId, petId }).exec();
   },
 
   async create(data: CreateVaccinationData): Promise<VaccinationDocument> {
     return VaccinationModel.create(data);
   },
 
-  async updateForOwner(
+  async updateById(
     vaccinationId: string | Types.ObjectId,
-    ownerId: Types.ObjectId,
+    petId: Types.ObjectId,
     data: UpdateVaccinationData,
   ): Promise<VaccinationDocument | null> {
     if (!Types.ObjectId.isValid(vaccinationId)) return null;
     return VaccinationModel.findOneAndUpdate(
-      { _id: vaccinationId, ownerId },
+      { _id: vaccinationId, petId },
       { $set: data },
-      { new: true, runValidators: true },
+      { returnDocument: 'after', runValidators: true },
     ).exec();
   },
 
-  async softDeleteForOwner(
+  async softDeleteById(
     vaccinationId: string | Types.ObjectId,
-    ownerId: Types.ObjectId,
+    petId: Types.ObjectId,
   ): Promise<VaccinationDocument | null> {
     if (!Types.ObjectId.isValid(vaccinationId)) return null;
     return VaccinationModel.findOneAndUpdate(
-      { _id: vaccinationId, ownerId },
+      { _id: vaccinationId, petId },
       { $set: { deletedAt: new Date() } },
-      { new: true },
+      { returnDocument: 'after' },
     ).exec();
   },
 
@@ -78,10 +76,9 @@ export const vaccinationRepository = {
    * Used by the dashboard's `lastVaccinationAt`.
    */
   async latestForPet(
-    ownerId: Types.ObjectId,
     petId: Types.ObjectId,
   ): Promise<VaccinationDocument | null> {
-    return VaccinationModel.findOne({ ownerId, petId })
+    return VaccinationModel.findOne({ petId })
       .sort({ givenAt: -1 })
       .exec();
   },
@@ -91,12 +88,10 @@ export const vaccinationRepository = {
    * Used by the dashboard's `nextVaccinationDueAt`.
    */
   async nextDueForPet(
-    ownerId: Types.ObjectId,
     petId: Types.ObjectId,
     now: Date,
   ): Promise<VaccinationDocument | null> {
     return VaccinationModel.findOne({
-      ownerId,
       petId,
       nextDueAt: { $gte: now },
     })

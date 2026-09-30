@@ -11,7 +11,7 @@ import ms from 'ms';
  *
  * Two kinds of tokens flow through the system:
  *
- * 1. Access token — a short-lived JWT. Signed, verified by signature only.
+ * 1. Access token — a short-lived JWT signed and verified with HS256.
  *    Payload: { sub: userId, type: 'access' }.
  *
  * 2. Refresh token — a long-lived random string. Never leaves the server
@@ -48,6 +48,7 @@ export function signAccessToken(userId: string): string {
   const payload: AccessTokenPayload = { sub: userId, type: 'access' };
   return jwt.sign(payload, env.jwtAccessSecret, {
     expiresIn: env.jwtAccessExpiresIn,
+    algorithm: 'HS256',
     issuer: 'pawpilot',
     audience: 'pawpilot-mobile',
   } as jwt.SignOptions);
@@ -56,6 +57,7 @@ export function signAccessToken(userId: string): string {
 export function verifyAccessToken(token: string): AccessTokenPayload {
   try {
     const decoded = jwt.verify(token, env.jwtAccessSecret, {
+      algorithms: ['HS256'],
       issuer: 'pawpilot',
       audience: 'pawpilot-mobile',
     }) as AccessTokenPayload;

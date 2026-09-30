@@ -17,7 +17,7 @@ import {
  * - It has a frequency that determines the reminder's repeat rule.
  *
  * Ownership:
- * - ownerId denormalized for scoping.
+ * - createdBy records who created the regimen.
  * - petId scopes to a pet.
  * - A linked reminder exists when frequency !== 'as_needed' AND the
  *   regimen's date range includes or extends past now.
@@ -34,7 +34,7 @@ export const MEDICATION_FREQUENCIES = [
 export type MedicationFrequency = (typeof MEDICATION_FREQUENCIES)[number];
 
 export interface Medication {
-  ownerId: Types.ObjectId;
+  createdBy: Types.ObjectId;
   petId: Types.ObjectId;
   name: string;
   dosage: string | null;
@@ -52,7 +52,7 @@ export interface Medication {
 
 const medicationSchema = new Schema<Medication>(
   {
-    ownerId: {
+    createdBy: {
       type: Schema.Types.ObjectId,
       ref: 'User',
       required: true,
@@ -168,8 +168,7 @@ medicationSchema.index({ petId: 1, startDate: -1 });
  * Active count query: startDate <= now AND (endDate IS NULL OR endDate >= now).
  * The `startDate` and `endDate` fields are the range filters.
  */
-medicationSchema.index({ ownerId: 1, petId: 1, startDate: -1 });
-medicationSchema.index({ ownerId: 1, petId: 1, endDate: 1 });
+medicationSchema.index({ petId: 1, endDate: 1 });
 
 medicationSchema.pre(/^find/, function (this: Query<unknown, unknown>) {
   const opts = this.getOptions() as { includeDeleted?: boolean };

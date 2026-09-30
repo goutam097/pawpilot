@@ -56,7 +56,7 @@ async function findDueReminders(now) {
             ],
         },
     })
-        .select('_id ownerId petId title description dueAt')
+        .select('_id createdBy petId title description dueAt')
         .limit(BATCH_SIZE)
         .lean()
         .exec();
@@ -98,7 +98,7 @@ export async function runNotifierTick(now = new Date()) {
         try {
             // Fetch the reminder's owner's devices. Each reminder is scoped to
             // one user, and we send to all their valid devices.
-            const tokens = await deviceRepository.findValidForUser(reminder.ownerId);
+            const tokens = await deviceRepository.findValidForUser(reminder.createdBy);
             if (tokens.length === 0) {
                 // No devices registered. Mark notified anyway so we don't retry
                 // forever — the user can't receive it. If they register a device

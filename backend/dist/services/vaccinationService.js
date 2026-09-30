@@ -86,7 +86,7 @@ async function createLinkedReminder(ownerId, petId, vaccination) {
     if (!vaccination.nextDueAt)
         return;
     await ReminderModel.create({
-        ownerId,
+        createdBy: ownerId,
         petId,
         title: `${vaccination.vaccineName} due`,
         description: `Next dose for ${vaccination.vaccineName}.`,

@@ -15,6 +15,13 @@ interface Env {
   readonly jwtRefreshSecret: string;
   readonly jwtAccessExpiresIn: string;
   readonly jwtRefreshExpiresIn: string;
+
+  readonly cloudinaryCloudName: string;
+  readonly cloudinaryApiKey: string;
+  readonly cloudinaryApiSecret: string;
+  readonly cloudinaryFolder: string;
+  readonly publicAppUrl: string;
+  readonly appleTeamId: string | null;
 }
 
 function readNodeEnv(): NodeEnv {
@@ -79,6 +86,15 @@ function readJwtSecret(name: string): string {
   return secret;
 }
 
+function readCloudinaryConfig() {
+  return {
+    cloudName: readRequiredString('CLOUDINARY_CLOUD_NAME', 3),
+    apiKey: readRequiredString('CLOUDINARY_API_KEY', 3),
+    apiSecret: readRequiredString('CLOUDINARY_API_SECRET', 3),
+    folder: process.env.CLOUDINARY_FOLDER?.trim() || 'pawpilot',
+  };
+}
+
 const nodeEnv = readNodeEnv();
 
 const jwtAccessSecret = readJwtSecret('JWT_ACCESS_SECRET');
@@ -87,6 +103,8 @@ const jwtRefreshSecret = readJwtSecret('JWT_REFRESH_SECRET');
 if (jwtAccessSecret === jwtRefreshSecret) {
   throw new Error('JWT_ACCESS_SECRET and JWT_REFRESH_SECRET must be different values.');
 }
+
+const cloudinaryConfig = readCloudinaryConfig();
 
 export const env: Env = Object.freeze({
   nodeEnv,
@@ -101,4 +119,11 @@ export const env: Env = Object.freeze({
   jwtRefreshSecret,
   jwtAccessExpiresIn: process.env.JWT_ACCESS_EXPIRES_IN ?? '15m',
   jwtRefreshExpiresIn: process.env.JWT_REFRESH_EXPIRES_IN ?? '30d',
+
+  cloudinaryCloudName: cloudinaryConfig.cloudName,
+  cloudinaryApiKey: cloudinaryConfig.apiKey,
+  cloudinaryApiSecret: cloudinaryConfig.apiSecret,
+  cloudinaryFolder: cloudinaryConfig.folder,
+  publicAppUrl: process.env.PUBLIC_APP_URL?.trim() || 'https://pawpilot.app',
+  appleTeamId: process.env.APPLE_TEAM_ID?.trim() || null,
 });

@@ -1,4 +1,15 @@
-import { Schema, model, type InferSchemaType, type HydratedDocument, type Model } from 'mongoose';
+import { Schema, model, Types, type HydratedDocument, type Model } from 'mongoose';
+
+export interface WeightRecordData {
+  petId: Types.ObjectId;
+  createdBy: Types.ObjectId;
+  weight: number;
+  unit: 'kg' | 'lb';
+  recordedAt: Date;
+  notes: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+}
 
 /**
  * Weight record — a single weight measurement for a pet.
@@ -7,10 +18,10 @@ import { Schema, model, type InferSchemaType, type HydratedDocument, type Model 
  * - History is the point. Owners want to see "27.5 → 28.0 → 28.2". A single
  *   field can't express that.
  * - Pet.weight is the CURRENT weight — a denormalized convenience field that
- *   we update on each weight record insert. Phase 14 will keep them in sync.
+ *   the weight service recomputes after every mutation.
  * - The dashboard reads the latest N records to compute current/previous/change.
  */
-const weightRecordSchema = new Schema(
+const weightRecordSchema = new Schema<WeightRecordData>(
   {
     petId: {
       type: Schema.Types.ObjectId,
@@ -19,11 +30,10 @@ const weightRecordSchema = new Schema(
       index: true,
     },
     /**
-     * Denormalized owner — used by the dashboard's "read this pet's weight
-     * history" query without a join. Set from the pet's ownerId on insert.
-     * Phase 14's service enforces that ownerId matches the pet's owner.
+    * User who created this record. Authorization is resolved from pet
+    * membership before repository access.
      */
-    ownerId: {
+    createdBy: {
       type: Schema.Types.ObjectId,
       ref: 'User',
       required: true,
@@ -64,7 +74,7 @@ const weightRecordSchema = new Schema(
  */
 weightRecordSchema.index({ petId: 1, recordedAt: -1 });
 
-export type WeightRecord = InferSchemaType<typeof weightRecordSchema>;
+export type WeightRecord = WeightRecordData;
 export type WeightRecordDocument = HydratedDocument<WeightRecord>;
 export type WeightRecordModel = Model<WeightRecord>;
 
